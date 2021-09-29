@@ -23,9 +23,8 @@
   },
   "author": "JD Wolk <jdwolk@gmail.com>",
   "dependencies": {
-    "@skpm/dialog": "^0.2.5",
-    "@skpm/fs": "^0.2.4",
-    "papaparse": "^4.6.3",
-    "ramda": "^0.26.1"
+    "@skpm/dialog": "^0.4.2",
+    "@skpm/fs": "^0.2.6",
+    "papaparse": "^5.3.0"
   }
 }

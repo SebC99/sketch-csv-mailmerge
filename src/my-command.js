@@ -1,45 +1,19 @@
-import * as sketch from 'sketch'
-import DOM from 'sketch/dom'
-import * as R from 'ramda'
-import dialog from '@skpm/dialog'
-import CSV from 'papaparse'
+const sketch = require('sketch')
+const DOM = require('sketch/dom')
+const dialog = require('@skpm/dialog')
+const CSV = require('papaparse')
 const fs = require('@skpm/fs')
 
 const CsvMailmerge = () => {
-  const debug = (obj) => {
-    console.log(JSON.stringify(obj))
-  }
-
-  const textsMatching = R.curry((str, texts) => {
-    const matches = (s) => s.text === str
-    return R.filter(matches, texts)
-  })
-
-  const isArtboard = (obj) => {
-    return obj.type === 'Artboard'
-  }
-
-  const isText = (obj) => {
-    return obj.type === 'Text'
-  }
-
-  const isSelected = (obj) => {
-    return obj.selected
-  }
-
-  const artboardsFromPage = (page) => {
-    return R.filter(isArtboard, page.layers)
-  }
-
   const selectedArtboards = (page) => {
-    return R.filter(isSelected, artboardsFromPage(page))
+    return page.layers.filter((layer) => layer.type == 'Artboard' && layer.selected);
   }
 
   const textLayers = (obj) => {
-    return R.filter(isText, obj.layers)
+    return (obj.type == "Text") ? obj : ((obj.type == 'Artboard' || obj.type == "Group") ? obj.layers.flatMap(layer => textLayers(layer)).filter(Boolean) : undefined);
   }
 
-  const extension = (path) => R.last(R.split('.', path))
+  const extension = (path) => path.split(".").slice(-1)[0];
 
   const applyToNewArtboard = (line, baseArtboard, index) => {
     const pixelsBetweenArtboards = 50
@@ -52,25 +26,32 @@ const CsvMailmerge = () => {
       duplicated.name = line.artboard
     }
 
-    const applyToMatchingTexts = R.curry((fn, key, val) => {
-      const matchingTextLayers = textsMatching(`{${key}}`, duplicatedText)
-      R.forEach((textLayer) => fn(textLayer, key, val), matchingTextLayers)
-    })
+    const applyToMatchingTexts = (fn) => (key, val) => {
+      const matchingTextLayers = duplicatedText.filter((layer) => layer.text == `{${key}}`);
+      matchingTextLayers.forEach((layer) => fn(layer, val));
+    }
 
-    const substituteText = (textLayer, key, val) => {
+    const substituteText = (textLayer, val) => {
       textLayer.text = val
     }
 
-    const substituteImg = (textLayer, key, val) => {
-      const parentArtboard = textLayer.getParentArtboard()
+    const substituteImg = (textLayer, val) => {
+      const parent = textLayer.parent;
       const layerIndex = textLayer.index
       const oldLayer = textLayer.remove()
-      const newLayer = new DOM.Image({
-        image: val,
-        frame: oldLayer.frame,
-        transform: oldLayer.transform,
-      })
-      parentArtboard.layers.splice(layerIndex, 0, newLayer)
+      let newLayer;
+      if (extension(val) == "svg") {
+        newLayer = sketch.createLayerFromData(fs.readFileSync(val, 'utf8'), 'svg')
+        newLayer.frame = oldLayer.frame;
+        newLayer.transform = oldLayer.transform;
+      } else {
+        newLayer = new DOM.Image({
+          image: val,
+          frame: oldLayer.frame,
+          transform: oldLayer.transform,
+        })
+      }
+      parent.layers.splice(layerIndex, 0, newLayer)
     }
 
     const applyTextVal = applyToMatchingTexts(substituteText)
@@ -78,33 +59,29 @@ const CsvMailmerge = () => {
     const applyImgVal = applyToMatchingTexts(substituteImg)
 
     const valIsImg = (val) => {
-      const imgExtensions = ['png', 'jpg', 'jpeg']
-      const theExtension = extension(val)
-      const toReturn = R.includes(theExtension, imgExtensions)
-      return toReturn
+      const imgExtensions = ['png', 'jpg', 'jpeg', 'svg'];
+      const theExtension = extension(val);
+      return imgExtensions.includes(theExtension);
     }
 
-    const applyVal = (val, key) => {
-      console.log('Applying "' + val + '" to "{' + key + '}"')
-      valIsImg(val)
-        ? applyImgVal(key, val)
-        : applyTextVal(key, val)
-    }
-
-    R.forEachObjIndexed(applyVal, line)
+    Object.entries(line).forEach(([key, val]) => {
+      console.log('Applying "' + val + '" to "{' + key + '}"');
+      valIsImg(val) ? applyImgVal(key, val) : applyTextVal(key, val);
+    })
+    
     duplicated.frame.x += widthOffset
 
     return duplicated
   }
 
   const promptForCsv = (cb) => {
-    const csvFilePath = R.last(dialog.showOpenDialog({
+    const csvFilePath = dialog.showOpenDialogSync({
       title: 'Choose CSV',
       properties: ['openFile'],
       filters: [
         { name: 'CSV', extensions: ['csv'] },
       ]
-    }))
+    })[0];
 
     if (!extension(csvFilePath) === '.csv') { return showExtensionError() }
 
@@ -135,9 +112,7 @@ const CsvMailmerge = () => {
     if (artboards.length === 1) {
       const artboard = artboards[0]
       promptForCsv((rows) => {
-        R.addIndex(R.forEach)((row, i) => {
-          applyToNewArtboard(row, artboard, i)
-        }, rows)
+        rows.forEach((row, i) => applyToNewArtboard(row, artboard, i));
       })
     } else {
       showSelectionError()
